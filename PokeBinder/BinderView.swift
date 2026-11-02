@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 enum StatusFilter: String, CaseIterable, Identifiable {
@@ -6,7 +7,7 @@ enum StatusFilter: String, CaseIterable, Identifiable {
 }
 
 struct BinderView: View {
-    @Environment(CollectionStore.self) private var store
+    @Query private var entries: [BinderEntry]
     @State private var query = ""
     @State private var status = StatusFilter.all
     @State private var language: CardLanguage?
@@ -17,10 +18,10 @@ struct BinderView: View {
     private let pageSize = 16
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
-    private var filtered: [Pokemon] {
+    private func matching(_ collection: [Int: OwnedCard]) -> [Pokemon] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: "#", with: "")
         return Pokemon.all.filter { p in
-            let owned = store.owned[p.id]
+            let owned = collection[p.id]
             return generation.range.contains(p.id)
                 && (q.isEmpty || p.name.lowercased().contains(q) || String(format: "%04d", p.id).contains(q))
                 && (status == .all || (status == .caught) == (owned != nil))
@@ -29,7 +30,8 @@ struct BinderView: View {
     }
 
     var body: some View {
-        let filtered = filtered
+        let collection = BinderEntry.collection(entries)
+        let filtered = matching(collection)
         let totalPages = max(1, (filtered.count + pageSize - 1) / pageSize)
         let current = min(page, totalPages - 1)
         let pagePokemon = filtered.dropFirst(current * pageSize).prefix(pageSize)
@@ -37,7 +39,7 @@ struct BinderView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    ProgressHeader(collected: store.owned.count, total: Pokemon.all.count)
+                    ProgressHeader(collected: collection.count, total: Pokemon.all.count)
                     filters
                     HStack {
                         Text("\(filtered.count) Pokémon in this view").font(.footnote).foregroundStyle(.secondary)
@@ -54,7 +56,7 @@ struct BinderView: View {
                     } else {
                         LazyVGrid(columns: columns, spacing: 8) {
                             ForEach(pagePokemon) { pokemon in
-                                Button { selected = pokemon } label: { Pocket(pokemon: pokemon, owned: store.owned[pokemon.id]) }
+                                Button { selected = pokemon } label: { Pocket(pokemon: pokemon, owned: collection[pokemon.id]) }
                                     .buttonStyle(.plain)
                             }
                         }
@@ -69,7 +71,7 @@ struct BinderView: View {
             .searchable(text: $query, prompt: "Name or Pokédex number")
             .onChange(of: query) { page = 0 }
             .sheet(item: $selected) { pokemon in
-                CardStationView(pokemon: pokemon).environment(store)
+                CardStationView(pokemon: pokemon, owned: collection[pokemon.id])
             }
         }
     }

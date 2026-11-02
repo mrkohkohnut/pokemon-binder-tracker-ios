@@ -7,7 +7,8 @@ enum CatalogueFilter: String, CaseIterable, Identifiable {
 
 struct CardStationView: View {
     let pokemon: Pokemon
-    @Environment(CollectionStore.self) private var store
+    let owned: OwnedCard?
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
     @State private var cards: [CardOption] = []
@@ -19,8 +20,6 @@ struct CardStationView: View {
     @State private var search = ""
     @State private var filter = CatalogueFilter.all
     @State private var limit = 36
-
-    private var owned: OwnedCard? { store.owned[pokemon.id] }
 
     private var baseCard: CardOption {
         CardOption(id: "base:\(pokemon.id)", sourceId: "base-\(pokemon.id)", name: "\(pokemon.name) · unlisted card",
@@ -119,12 +118,12 @@ struct CardStationView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .bottomBar) {
-                    Button("Mark missing", role: .destructive) { store.remove(pokemon.id); dismiss() }
+                    Button("Mark missing", role: .destructive) { context.removeCard(for: pokemon.id); dismiss() }
                         .disabled(owned == nil)
                 }
                 ToolbarItem(placement: .bottomBar) {
                     Button(owned == nil ? "Add to binder" : "Replace card") {
-                        store.save(draft, language: language, for: pokemon.id)
+                        context.saveCard(draft, language: language, for: pokemon.id)
                         dismiss()
                     }
                     .buttonStyle(.borderedProminent)

@@ -6,9 +6,10 @@ SwiftUI port of [pokemon-binder-tracker](https://github.com/mrkohkohnut/pokemon-
 
 1. Open `PokeBinder.xcodeproj` in Xcode 16+.
 2. Under Signing & Capabilities, choose your team and change the bundle ID from `com.example.PokeBinder` to your own.
-3. Run. Requires iOS 17+.
+3. In the iCloud capability, replace the container `iCloud.com.example.PokeBinder` with `iCloud.<your bundle ID>` (Xcode creates it in your developer account). Push Notifications and Background Modes → Remote notifications are already declared in `PokeBinder.entitlements` and `PokeBinder-Info.plist`.
+4. Run on a device or simulator signed in to iCloud. Requires iOS 17+.
 
-The iCloud key-value storage capability is already set in `PokeBinder.entitlements`. Xcode's automatic signing registers it with your Apple Developer account. If Xcode doesn't list iCloud under Signing & Capabilities, add the capability and tick **Key-value storage**.
+Before releasing, deploy the schema to production in the [CloudKit Console](https://icloud.developer.apple.com/) and set `aps-environment` to `production` for release builds (Xcode does this when archiving).
 
 ## What's ported
 
@@ -18,5 +19,5 @@ The iCloud key-value storage capability is already set in `PokeBinder.entitlemen
 
 ## Differences from the web app
 
-- The collection syncs through iCloud key-value storage, tied to the device's Apple ID, so there's no separate sign-in. It works offline and when signed out of iCloud, then syncs when it can. The web app's Sign in with ChatGPT sync isn't included, because it only works on the web app's hosting platform.
+- The collection syncs through CloudKit (SwiftData with the private iCloud database), one record per Pokémon, so there's no separate sign-in. It works offline and syncs when it can. The web app's Sign in with ChatGPT sync isn't included, because it only works on the web app's hosting platform.
 - The Pokémon names in `PokeBinder/PokemonData.swift` are generated from the web app's `app/data/pokemon.ts`.

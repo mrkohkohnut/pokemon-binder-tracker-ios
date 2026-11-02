@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import SwiftData
 
 enum CardLanguage: String, Codable, CaseIterable, Identifiable {
     case english = "English", japanese = "Japanese", chinese = "Chinese", korean = "Korean"
@@ -62,57 +62,51 @@ struct Generation: Identifiable, Hashable {
     ]
 }
 
-/// Collection synced through iCloud key-value storage. Works offline and when signed out of iCloud
-/// (the store keeps a local copy and syncs when it can).
-// ponytail: iCloud KVS caps at 1 MB total; a full 1,025-card binder is ~0.6 MB. Move to CloudKit if records grow.
-@Observable
-final class CollectionStore {
-    private(set) var owned: [Int: OwnedCard] = [:]
-    private let cloud = NSUbiquitousKeyValueStore.default
-    private let key = "binder-collection"
+///// One binder pocket, synced to the private CloudKit database by SwiftData.
+/// CloudKit needs every attribute optional or defaulted and doesn't allow unique constraints.
+@Model
+final class BinderEntry {
+    var pokemonId: Int = 0
+    var cardId: String = ""
+    var language: String = CardLanguage.english.rawValue
+    var acquiredAt: Date = Date.now
+    var updatedAt: Date = Date.now
+    var cardJSON: Data?
 
-    init() {
-        NotificationCenter.default.addObserver(
-            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification, object: cloud, queue: .main
-        ) { [weak self] note in
-            if let reason = note.userInfo?[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int,
-               reason == NSUbiquitousKeyValueStoreQuotaViolationChange {
-                print("iCloud quota exceeded; binder changes are only on this device.")
-            }
-            self?.load()
-        }
-        cloud.synchronize()
-        load()
+    init(pokemonId: Int) { self.pokemonId = pokemonId }
+
+    var owned: OwnedCard {
+        OwnedCard(cardId: cardId, language: CardLanguage(rawValue: language) ?? .english, acquiredAt: acquiredAt,
+                  card: cardJSON.flatMap { try? JSONDecoder().decode(CardOption.self, from: $0) })
     }
 
-    func save(_ card: CardOption, language: CardLanguage, for pokemonId: Int) {
+    /// Latest entry per Pokémon (two offline devices can each insert one).
+    static func collection(_ entries: [BinderEntry]) -> [Int: OwnedCard] {
+        Dictionary(entries.map { ($0.pokemonId, $0) }) { $0.updatedAt >= $1.updatedAt ? $0 : $1 }.mapValues(\.owned)
+    }
+}
+
+extension ModelContext {
+    func saveCard(_ card: CardOption, language: CardLanguage, for pokemonId: Int) {
+        let existing = entries(for: pokemonId)
+        let entry = existing.first ?? BinderEntry(pokemonId: pokemonId)
+        if existing.isEmpty { insert(entry) }
+        existing.dropFirst().forEach { delete($0) }
+
         var chosen = card
         chosen.language = language.rawValue
-        owned[pokemonId] = OwnedCard(
-            cardId: card.id,
-            language: language,
-            acquiredAt: owned[pokemonId]?.acquiredAt ?? .now,
-            card: chosen
-        )
-        persist()
+        entry.cardId = card.id
+        entry.language = language.rawValue
+        entry.cardJSON = try? JSONEncoder().encode(chosen)
+        entry.updatedAt = .now
     }
 
-    func remove(_ pokemonId: Int) {
-        owned[pokemonId] = nil
-        persist()
+    func removeCard(for pokemonId: Int) {
+        entries(for: pokemonId).forEach { delete($0) }
     }
 
-    private func load() {
-        guard let data = cloud.data(forKey: key),
-              let saved = try? JSONDecoder().decode([Int: OwnedCard].self, from: data) else { return }
-        owned = saved
-    }
-
-    private func persist() {
-        do {
-            cloud.set(try JSONEncoder().encode(owned), forKey: key)
-        } catch {
-            print("Failed to encode collection: \(error)")
-        }
+    private func entries(for pokemonId: Int) -> [BinderEntry] {
+        (try? fetch(FetchDescriptor<BinderEntry>(predicate: #Predicate { $0.pokemonId == pokemonId },
+                                                 sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]))) ?? []
     }
 }

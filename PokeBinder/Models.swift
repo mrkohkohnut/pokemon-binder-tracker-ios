@@ -62,18 +62,27 @@ struct Generation: Identifiable, Hashable {
     ]
 }
 
-/// Device-local collection, saved as JSON in Documents.
-// ponytail: device-only storage; add iCloud (NSUbiquitousKeyValueStore/CloudKit) if multi-device sync is needed.
+/// Collection synced through iCloud key-value storage. Works offline and when signed out of iCloud
+/// (the store keeps a local copy and syncs when it can).
+// ponytail: iCloud KVS caps at 1 MB total; a full 1,025-card binder is ~0.6 MB. Move to CloudKit if records grow.
 @Observable
 final class CollectionStore {
     private(set) var owned: [Int: OwnedCard] = [:]
-    private let fileURL = URL.documentsDirectory.appending(path: "binder-collection.json")
+    private let cloud = NSUbiquitousKeyValueStore.default
+    private let key = "binder-collection"
 
     init() {
-        if let data = try? Data(contentsOf: fileURL),
-           let saved = try? JSONDecoder().decode([Int: OwnedCard].self, from: data) {
-            owned = saved
+        NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification, object: cloud, queue: .main
+        ) { [weak self] note in
+            if let reason = note.userInfo?[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int,
+               reason == NSUbiquitousKeyValueStoreQuotaViolationChange {
+                print("iCloud quota exceeded; binder changes are only on this device.")
+            }
+            self?.load()
         }
+        cloud.synchronize()
+        load()
     }
 
     func save(_ card: CardOption, language: CardLanguage, for pokemonId: Int) {
@@ -93,11 +102,17 @@ final class CollectionStore {
         persist()
     }
 
+    private func load() {
+        guard let data = cloud.data(forKey: key),
+              let saved = try? JSONDecoder().decode([Int: OwnedCard].self, from: data) else { return }
+        owned = saved
+    }
+
     private func persist() {
         do {
-            try JSONEncoder().encode(owned).write(to: fileURL, options: .atomic)
+            cloud.set(try JSONEncoder().encode(owned), forKey: key)
         } catch {
-            print("Failed to save collection: \(error)")
+            print("Failed to encode collection: \(error)")
         }
     }
 }

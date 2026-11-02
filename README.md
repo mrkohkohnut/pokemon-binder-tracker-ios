@@ -4,7 +4,11 @@ SwiftUI port of [pokemon-binder-tracker](https://github.com/mrkohkohnut/pokemon-
 
 ## Run
 
-Open `PokeBinder.xcodeproj` in Xcode 16+, choose your team under Signing & Capabilities, and run. Requires iOS 17+.
+1. Open `PokeBinder.xcodeproj` in Xcode 16+.
+2. Under Signing & Capabilities, choose your team and change the bundle ID from `com.example.PokeBinder` to your own.
+3. Run. Requires iOS 17+.
+
+The iCloud key-value storage capability is already set in `PokeBinder.entitlements`. Xcode's automatic signing registers it with your Apple Developer account. If Xcode doesn't list iCloud under Signing & Capabilities, add the capability and tick **Key-value storage**.
 
 ## What's ported
 
@@ -14,5 +18,5 @@ Open `PokeBinder.xcodeproj` in Xcode 16+, choose your team under Signing & Capab
 
 ## Differences from the web app
 
-- The collection is saved on the device, in `Documents/binder-collection.json`. The web app's cloud sync relies on Sign in with ChatGPT, which only works on its hosting platform, so it isn't included.
+- The collection syncs through iCloud key-value storage, tied to the device's Apple ID, so there's no separate sign-in. It works offline and when signed out of iCloud, then syncs when it can. The web app's Sign in with ChatGPT sync isn't included, because it only works on the web app's hosting platform.
 - The Pokémon names in `PokeBinder/PokemonData.swift` are generated from the web app's `app/data/pokemon.ts`.

@@ -8,7 +8,7 @@ enum CatalogueFilter: String, CaseIterable, Identifiable {
 struct CardStationView: View {
     let pokemon: Pokemon
     let owned: OwnedCard?
-    @Environment(\.modelContext) private var context
+    @Environment(CollectionStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -102,13 +102,13 @@ struct CardStationView: View {
 
     private var actions: some View {
         HStack(spacing: 12) {
-            Button(role: .destructive) { context.removeCard(for: pokemon.id); dismiss() } label: {
+            Button(role: .destructive) { store.remove(pokemon.id); dismiss() } label: {
                 Text("Mark missing").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .disabled(owned == nil)
 
-            Button { context.saveCard(draft, language: language, for: pokemon.id); dismiss() } label: {
+            Button { store.save(draft, language: language, for: pokemon.id); dismiss() } label: {
                 HStack(spacing: 8) {
                     PokeBall(size: 18, top: .white)
                     Text(owned == nil ? "Catch it!" : "Replace card").bold()

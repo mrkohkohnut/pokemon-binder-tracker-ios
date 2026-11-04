@@ -4,12 +4,15 @@ SwiftUI port of [pokemon-binder-tracker](https://github.com/mrkohkohnut/pokemon-
 
 ## Run
 
-1. Open `PokeBinder.xcodeproj` in Xcode 16+.
-2. Under Signing & Capabilities, choose your team and change the bundle ID from `com.example.PokeBinder` to your own.
-3. In the iCloud capability, replace the container `iCloud.com.example.PokeBinder` with `iCloud.<your bundle ID>` (Xcode creates it in your developer account). Push Notifications and Background Modes → Remote notifications are already declared in `PokeBinder.entitlements` and `PokeBinder-Info.plist`.
-4. Run on a device or simulator signed in to iCloud. Requires iOS 17+.
+1. Open `PokeBinder.xcodeproj` in Xcode 16+ and build. Requires iOS 17+. No special capabilities are needed, so the app can be re-signed by any signer (FlareStore, etc.).
+2. Deploy the web app ([pokemon-binder-tracker](https://github.com/mrkohkohnut/pokemon-binder-tracker)) with its `/api/sync` endpoint, as a **public** site.
 
-Before releasing, deploy the schema to production in the [CloudKit Console](https://icloud.developer.apple.com/) and set `aps-environment` to `production` for release builds (Xcode does this when archiving).
+## Syncing two phones
+
+1. On the phone with your cards, tap the cloud button (top left), enter the web app's `https://` address, then tap **Start syncing this binder**.
+2. On the other phone, enter the same address and the sync code, then tap **Link this phone**.
+
+Changes upload straight away. The other phone picks them up within about 15 seconds while the binder is open, when the app comes back to the foreground, or when you pull down to refresh.
 
 ## What's ported
 
@@ -19,5 +22,5 @@ Before releasing, deploy the schema to production in the [CloudKit Console](http
 
 ## Differences from the web app
 
-- The collection syncs through CloudKit (SwiftData with the private iCloud database), one record per Pokémon, so there's no separate sign-in. It works offline and syncs when it can. The web app's Sign in with ChatGPT sync isn't included, because it only works on the web app's hosting platform.
+- The collection syncs through the web app's `/api/sync` endpoint with a sync code, not iCloud or a ChatGPT sign-in. iCloud only works when the app is signed with your own Apple Developer account, so re-signed IPAs (such as FlareStore) can't use it. The phones' binder is stored separately from the binder of the ChatGPT account signed in on the website.
 - The Pokémon names in `PokeBinder/PokemonData.swift` are generated from the web app's `app/data/pokemon.ts`.

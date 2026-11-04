@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 
 enum StatusFilter: String, CaseIterable, Identifiable {
@@ -7,7 +6,9 @@ enum StatusFilter: String, CaseIterable, Identifiable {
 }
 
 struct BinderView: View {
-    @Query private var entries: [BinderEntry]
+    @Environment(CollectionStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showSync = false
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var query = ""
     @State private var status = StatusFilter.all
@@ -32,7 +33,7 @@ struct BinderView: View {
     }
 
     var body: some View {
-        let collection = BinderEntry.collection(entries)
+        let collection = store.owned
         let filtered = matching(collection)
         let step = perPage * (spread ? 2 : 1)
         let totalSteps = max(1, (filtered.count + step - 1) / step)
@@ -70,15 +71,30 @@ struct BinderView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                Menu {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showSync = true } label: { Label("Sync", systemImage: store.status.symbol) }
+                        .accessibilityValue(store.status.label)
+                }
+                ToolbarItem(placement: .topBarTrailing) { Menu {
                     Picker("Card language", selection: $language) {
                         Text("Any language").tag(CardLanguage?.none)
                         ForEach(CardLanguage.allCases) { Text($0.rawValue).tag(Optional($0)) }
                     }
                 } label: {
                     Label("Card language", systemImage: language == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                } }
+            }
+            .refreshable { await store.pull() }
+            // Pick up catches from the other phone while the binder is open.
+            // ponytail: 15 s polling; switch to push (APNs/websocket) if the server bill or latency matters.
+            .task {
+                while !Task.isCancelled {
+                    await store.pull()
+                    try? await Task.sleep(for: .seconds(15))
                 }
             }
+            .onChange(of: scenePhase) { if scenePhase == .active { Task { await store.pull() } } }
+            .sheet(isPresented: $showSync) { SyncView() }
             .searchable(text: $query, prompt: "Name or Pokédex number")
             .onChange(of: query) { page = 0 }
             .onChange(of: status) { page = 0 }

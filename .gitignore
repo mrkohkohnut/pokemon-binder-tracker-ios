@@ -3,3 +3,6 @@ xcuserdata/
 DerivedData/
 .DS_Store
 build/
+
+# Shared sync code baked into local builds (repo is public)
+PokeBinder/auto-sync-code.txt

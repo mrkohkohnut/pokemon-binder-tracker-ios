@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.nicholaskoh.pokebinder-sync</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>mkdir -p "$HOME/Library/Logs/PokeBinderSync" &amp;&amp; exec /usr/bin/python3 "$HOME/Library/Application Support/PokeBinderSync/sync_server.py" &gt;&gt; "$HOME/Library/Logs/PokeBinderSync/sync.log" 2&gt;&amp;1</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>SYNC_HOST</key>
+		<string>127.0.0.1</string>
+		<key>SYNC_PORT</key>
+		<string>8767</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+</dict>
+</plist>

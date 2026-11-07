@@ -20,10 +20,10 @@ struct BinderView: View {
     @State private var pendingGotcha: Pokemon?
     @State private var width: CGFloat = 0
 
-    /// Real binders hold 9 cards a page. Wide screens (unfolded, landscape) show an open two-page spread.
+    /// Matches the physical binder: 4×4 pockets a page. Wide screens show an open two-page spread.
     /// Decided by measured width, not size class: foldables report compact even when wide.
-    private var spread: Bool { width >= 540 }
-    private let perPage = 9
+    private var spread: Bool { width >= 700 }
+    private let perPage = 16
 
     private func matching(_ collection: [Int: OwnedCard]) -> [Pokemon] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: "#", with: "")
@@ -56,6 +56,7 @@ struct BinderView: View {
                         ForEach(StatusFilter.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    .background(Color(.secondarySystemGroupedBackground), in: .capsule) // Hide roaming Pokémon behind it.
                     .padding(.horizontal)
 
                     if shown.isEmpty {
@@ -63,6 +64,11 @@ struct BinderView: View {
                             Label { Text("No Pokémon found") } icon: { PokeBall(size: 52) }
                         } description: { Text("Try a different name, region, or binder filter.") }
                     } else {
+                        // Pokémon hanging out on top of the binder.
+                        PokemonLedge(caught: Array(collection.keys), count: spread ? 8 : 5)
+                            .padding(.horizontal, 28)
+                            .padding(.bottom, -22)
+
                         ZStack {
                             BinderSpread(pokemon: shown, perPage: perPage, spread: spread, collection: collection) { selected = $0 }
                                 .id("\(generation.id)-\(current)-\(spread)")
@@ -78,11 +84,16 @@ struct BinderView: View {
                     }
                 }
                 .padding(.bottom, 24)
-                .frame(maxWidth: spread ? 1100 : 600)
+                .frame(maxWidth: spread ? 1200 : 600)
                 .frame(maxWidth: .infinity)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-            .background(RegionBackdrop(accent: generation.accent))
+            .background {
+                ZStack {
+                    RegionBackdrop(accent: generation.accent)
+                    SpriteParade(caught: Array(collection.keys), count: spread ? 12 : 8)
+                }
+            }
             .navigationTitle("Poké Binder")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -104,6 +115,7 @@ struct BinderView: View {
             // Pick up catches from the other phone while the binder is open.
             // Poll every 15 s while open; use push if server cost or latency becomes a concern.
             .task {
+                await store.linkAutomaticallyIfNeeded()
                 while !Task.isCancelled {
                     await store.pull()
                     try? await Task.sleep(for: .seconds(15))
@@ -298,8 +310,10 @@ private struct RegionBadges: View {
             .frame(width: 76)
             .padding(.vertical, 10)
             .background {
+                // Opaque, so Pokémon roaming the background pass behind it.
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(active ? gen.accent.opacity(0.16) : Color(.secondarySystemGroupedBackground))
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(gen.accent.opacity(active ? 0.16 : 0)))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -340,12 +354,12 @@ private struct BinderSpread: View {
     }
 
     private func page(_ items: [Pokemon]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 12) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 10) {
             ForEach(items) { p in
                 Button { onSelect(p) } label: { Pocket(pokemon: p, owned: collection[p.id]) }
                     .buttonStyle(PocketPressStyle())
             }
-            // Keep the 3×3 shape on a part-filled last page.
+            // Keep the 4×4 shape on a part-filled last page.
             ForEach(items.count..<perPage, id: \.self) { _ in
                 VStack(spacing: 6) {
                     RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(.quaternarySystemFill))
@@ -359,7 +373,7 @@ private struct BinderSpread: View {
 
     private var punchHoles: some View {
         VStack {
-            ForEach(0..<3) { _ in
+            ForEach(0..<4) { _ in
                 Spacer()
                 Circle().fill(Color(.systemGroupedBackground)).frame(width: 9, height: 9)
                     .overlay(Circle().stroke(.black.opacity(0.08)))

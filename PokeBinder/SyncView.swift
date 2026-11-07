@@ -20,7 +20,7 @@ extension CollectionStore.SyncStatus {
     }
 }
 
-/// Link phones with a sync code. Needs the web app deployed publicly with /api/sync.
+/// Link phones with a sync code. Syncs through the Mac mini at pokemon.kohkohnut.ing by default.
 struct SyncView: View {
     @Environment(CollectionStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -33,17 +33,39 @@ struct SyncView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("https://your-site.example", text: $store.serverURL)
+                    TextField(CollectionStore.defaultServer, text: $store.serverURL)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
-                    Text("Web app address")
+                    Text("Sync server")
                 } footer: {
-                    Text("The Poké Binder website both phones sync through. It must be public, not a Private Site.")
+                    if store.serverURL != CollectionStore.defaultServer {
+                        Button("Use \(CollectionStore.defaultServer)") { store.serverURL = CollectionStore.defaultServer }
+                    } else {
+                        Text("Your Mac mini keeps the shared binder. It needs to be on for phones to sync.")
+                    }
+                }
+
+                if store.isAutomatic {
+                    Section {
+                        Label("Syncing automatically", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(Color.pokeGreen)
+                    } footer: {
+                        Text("Every phone with this build shares your binder through your Mac mini. No code needed.")
+                    }
+                } else if CollectionStore.automaticCode != nil {
+                    Section {
+                        Button { run { await store.useAutomaticSync() } } label: {
+                            Label("Use automatic sync", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    } footer: {
+                        Text("Joins the binder your other phones share automatically. Cards caught on this phone are kept.")
+                    }
                 }
 
                 if let code = store.syncCode {
+                    if !store.isAutomatic {
                     Section {
                         Text(grouped(code))
                             .font(.title3.monospaced().bold())
@@ -55,6 +77,7 @@ struct SyncView: View {
                         Text("Your sync code")
                     } footer: {
                         Text("Enter this on your other phone. Anyone with the code can see and edit your binder, so keep it private.")
+                    }
                     }
 
                     Section {

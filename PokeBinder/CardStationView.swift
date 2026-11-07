@@ -88,7 +88,12 @@ struct CardStationView: View {
                 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-            .background(RegionBackdrop(accent: region.accent))
+            .background {
+                ZStack {
+                    RegionBackdrop(accent: region.accent)
+                    SpriteParade(caught: Array(store.owned.keys), count: 5)
+                }
+            }
             .navigationTitle(pokemon.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -143,6 +148,7 @@ struct CardStationView: View {
                 ForEach(CardLanguage.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
+            .background(Color(.secondarySystemGroupedBackground), in: .capsule) // Hide roaming Pokémon behind it.
         }
     }
 
@@ -166,6 +172,7 @@ struct CardStationView: View {
                 Circle().fill(.white.opacity(0.18)).frame(width: 170, height: 170).blur(radius: 18)
                 Ellipse().fill(.black.opacity(0.2)).frame(width: 130, height: 20).blur(radius: 5).offset(y: 80)
                 Sprite(url: pokemon.artworkURL, silhouette: owned == nil, pixelated: false).frame(width: 170, height: 170)
+                    .modifier(IdleBounce(excited: owned != nil))
                     .shadow(color: .black.opacity(0.2), radius: 10, y: 8)
             }
             .frame(height: 190)

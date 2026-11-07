@@ -63,9 +63,9 @@ struct Generation: Identifiable, Hashable {
     ]
 }
 
-/// The binder, cached on the device and synced through the web app's `/api/sync` endpoint.
-/// Phones share a binder by sharing a sync code, so it works with any signing (FlareStore included),
-/// unlike iCloud, which needs the app signed with your own developer account.
+/// The binder, cached on the device and synced through an `/api/sync` endpoint: the Mac mini server
+/// (Server/sync_server.py at pokemon.kohkohnut.ing) by default, or the web app, which speaks the same protocol.
+/// Phones share a binder by sharing a sync code, so it works with any signing (FlareStore included).
 @Observable @MainActor
 final class CollectionStore {
     enum SyncStatus: Equatable { case off, syncing, synced, failed(String) }
@@ -74,6 +74,18 @@ final class CollectionStore {
     private(set) var status = SyncStatus.off
     private(set) var syncCode: String? { didSet { defaults.set(syncCode, forKey: "syncCode") } }
     var serverURL: String { didSet { defaults.set(serverURL, forKey: "serverURL") } }
+    static let defaultServer = "https://pokemon.kohkohnut.ing"
+
+    /// Shared code baked into builds made on the Mac mini, so every phone joins the same binder with no setup.
+    /// Lives in the gitignored PokeBinder/auto-sync-code.txt (the repo is public); builds without it fall back to manual codes.
+    static let automaticCode: String? = {
+        guard let url = Bundle.main.url(forResource: "auto-sync-code", withExtension: "txt"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let code = text.uppercased().filter { $0.isLetter || $0.isNumber }
+        return code.count >= 20 ? code : nil
+    }()
+
+    var isAutomatic: Bool { syncCode != nil && syncCode == Self.automaticCode }
 
     /// Local edits not yet accepted by the server; a pull never overwrites them.
     private var dirty: Bool { didSet { defaults.set(dirty, forKey: "syncDirty") } }
@@ -84,7 +96,7 @@ final class CollectionStore {
     init() {
         let saved = UserDefaults.standard
         syncCode = saved.string(forKey: "syncCode")
-        serverURL = saved.string(forKey: "serverURL") ?? ""
+        serverURL = saved.string(forKey: "serverURL").flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultServer
         dirty = saved.bool(forKey: "syncDirty")
         if let data = try? Data(contentsOf: fileURL), let saved = try? Self.decode(data) { owned = saved }
     }
@@ -137,8 +149,26 @@ final class CollectionStore {
     }
 
     func unlink() {
+        // Remember the choice so automatic sync doesn't re-link straight away.
+        if isAutomatic { defaults.set(true, forKey: "automaticSyncOff") }
         syncCode = nil
         status = .off
+    }
+
+    /// Join the built-in binder on launch, keeping any cards already caught on this phone.
+    /// Phones already on a manual code move over once; after that a manual code someone picks is respected.
+    func linkAutomaticallyIfNeeded() async {
+        guard let code = Self.automaticCode, !isAutomatic, !defaults.bool(forKey: "automaticSyncOff") else { return }
+        if syncCode != nil, defaults.bool(forKey: "movedToAutomaticSync") { return }
+        defaults.set(true, forKey: "movedToAutomaticSync")
+        await link(code: code)
+    }
+
+    /// Switch this phone (back) to the built-in binder.
+    func useAutomaticSync() async {
+        guard let code = Self.automaticCode else { return }
+        defaults.set(false, forKey: "automaticSyncOff")
+        await link(code: code)
     }
 
     // MARK: Sync
@@ -214,9 +244,9 @@ final class CollectionStore {
         case noServer, badCode, unreadable, server(String)
         var errorDescription: String? {
             switch self {
-            case .noServer: "Add your web app’s https address in Sync settings."
+            case .noServer: "Add your sync server’s https address in Sync settings."
             case .badCode: "The server didn’t accept this sync code."
-            case .unreadable: "The server sent something unexpected. Make sure the web app is public and redeployed with /api/sync."
+            case .unreadable: "The server sent something unexpected. Check the sync server address and that the Mac mini is on."
             case .server(let message): "The server couldn’t save the binder. \(message)"
             }
         }

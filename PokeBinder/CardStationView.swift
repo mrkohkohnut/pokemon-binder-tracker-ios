@@ -9,8 +9,9 @@ struct CardStationView: View {
     let pokemon: Pokemon
     let owned: OwnedCard?
     @Environment(CollectionStore.self) private var store
+    var onCatch: (Pokemon) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var width: CGFloat = 0
 
     @State private var cards: [CardOption] = []
     @State private var coverage = ""
@@ -68,8 +69,8 @@ struct CardStationView: View {
 
         NavigationStack {
             ScrollView {
-                // Wide screens: the chosen card stays beside the catalogue.
-                if sizeClass == .regular {
+                // Wide screens (unfolded, landscape): the chosen card stays beside the catalogue.
+                if width >= 640 {
                     HStack(alignment: .top, spacing: 20) {
                         VStack(spacing: 16) { identity(alternates: alternates); languagePicker; preview }
                             .frame(width: 340)
@@ -86,43 +87,53 @@ struct CardStationView: View {
                     .padding()
                 }
             }
-            .background(PokeBallBackdrop())
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .background(RegionBackdrop(accent: region.accent))
             .navigationTitle(pokemon.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.pokeRed, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Label("Close", systemImage: "xmark") }
+                }
             }
             .safeAreaInset(edge: .bottom) { actions }
             .task { await load() }
         }
+        .tint(region.accent)
     }
+
+    private var region: Generation { Generation.of(pokemon.id) }
 
     private var actions: some View {
         HStack(spacing: 12) {
-            Button(role: .destructive) { store.remove(pokemon.id); dismiss() } label: {
-                Text("Mark missing").frame(maxWidth: .infinity)
+            if owned != nil {
+                Button(role: .destructive) { store.remove(pokemon.id); dismiss() } label: {
+                    Label("Release", systemImage: "arrow.uturn.backward").frame(maxWidth: .infinity)
+                }
+                .secondaryButton()
             }
-            .buttonStyle(.bordered)
-            .disabled(owned == nil)
 
-            Button { store.save(draft, language: language, for: pokemon.id); dismiss() } label: {
+            Button {
+                store.save(draft, language: language, for: pokemon.id)
+                if owned == nil { onCatch(pokemon) }
+                dismiss()
+            } label: {
                 HStack(spacing: 8) {
-                    PokeBall(size: 18, top: .white)
-                    Text(owned == nil ? "Catch it!" : "Replace card").bold()
+                    PokeBall(size: 20, top: .white)
+                    Text(owned == nil ? "Catch \(pokemon.name)!" : "Swap card").bold().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .prominentButton()
         }
         .controlSize(.large)
         .padding(.horizontal)
         .padding(.vertical, 10)
         .frame(maxWidth: 700)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .background {
+            if #unavailable(iOS 26) { Rectangle().fill(.bar).ignoresSafeArea() }
+        }
     }
 
     private var languagePicker: some View {
@@ -148,40 +159,61 @@ struct CardStationView: View {
         loading = false
     }
 
-    /// Pokédex screen: sprite on a battle platform.
+    /// Pokédex entry: the Pokémon standing in a spotlight of its home region's colour.
     private func identity(alternates: Int) -> some View {
-        HStack(spacing: 16) {
+        VStack(spacing: 12) {
             ZStack {
-                Ellipse().fill(Color.pokeGreen.opacity(0.35)).frame(width: 86, height: 22).offset(y: 30)
-                Sprite(url: pokemon.spriteURL, silhouette: owned == nil).frame(width: 92, height: 92)
+                Circle().fill(.white.opacity(0.18)).frame(width: 170, height: 170).blur(radius: 18)
+                Ellipse().fill(.black.opacity(0.2)).frame(width: 130, height: 20).blur(radius: 5).offset(y: 80)
+                Sprite(url: pokemon.artworkURL, silhouette: owned == nil, pixelated: false).frame(width: 170, height: 170)
+                    .shadow(color: .black.opacity(0.2), radius: 10, y: 8)
             }
-            .frame(width: 104, height: 104)
-            .background(LinearGradient(colors: [Color(red: 0.86, green: 0.95, blue: 0.86), .white], startPoint: .top, endPoint: .bottom),
-                        in: .rect(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.pokeNavy.opacity(0.8), lineWidth: 3))
+            .frame(height: 190)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text(pokemon.dex).font(.caption.bold().monospacedDigit()).opacity(0.85)
-                    Text(owned == nil ? "Missing" : "In binder").font(.caption2.bold())
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(owned == nil ? Color.black.opacity(0.25) : Color.pokeYellow, in: .capsule)
-                        .foregroundStyle(owned == nil ? Color.white : Color.pokeNavy)
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(pokemon.dex).monospacedDigit()
+                    Text("·")
+                    Text(region.shortName)
                 }
-                Text(pokemon.name).font(.title2.bold())
-                Text(owned.map { "\($0.card?.name ?? "Chosen card") · \($0.language.rawValue)" }
-                     ?? "Pick the exact printing that belongs in this pocket.")
-                    .font(.footnote).opacity(0.9)
-                if alternates > 0 {
-                    Text("\(alternates) alternate version\(alternates == 1 ? "" : "s") grouped here").font(.caption2.bold()).foregroundStyle(Color.pokeYellow)
+                .font(.subheadline.weight(.semibold)).opacity(0.85)
+
+                Text(owned == nil ? "Who’s that Pokémon? It’s \(pokemon.name)!" : pokemon.name)
+                    .font(owned == nil ? .title3.bold() : .largeTitle.bold())
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 6) {
+                    Label(owned == nil ? "Not caught" : "Caught", systemImage: owned == nil ? "circle.dashed" : "checkmark.circle.fill")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.white.opacity(owned == nil ? 0.2 : 0.95), in: .capsule)
+                        .foregroundStyle(owned == nil ? Color.white : region.accent)
+                    if alternates > 0 {
+                        Text("\(alternates) alternate form\(alternates == 1 ? "" : "s")")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(.white.opacity(0.2), in: .capsule)
+                    }
+                }
+
+                if let owned {
+                    Text("\(owned.card?.name ?? "Chosen card") · \(owned.language.rawValue)")
+                        .font(.footnote).opacity(0.85).multilineTextAlignment(.center)
                 }
             }
-            Spacer(minLength: 0)
         }
         .foregroundStyle(.white)
-        .padding(14)
-        .background(LinearGradient(colors: [.pokeRed, .pokeRedDark], startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: .rect(cornerRadius: 20))
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background {
+            region.accent
+                .overlay(LinearGradient(colors: [.white.opacity(0.18), .clear, .black.opacity(0.25)], startPoint: .top, endPoint: .bottom))
+                .overlay(alignment: .topTrailing) {
+                    PokeBall(size: 260, top: .white, bottom: .white.opacity(0.5)).opacity(0.07).offset(x: 90, y: -70)
+                }
+                .clipShape(.rect(cornerRadius: 28, style: .continuous))
+        }
+        .accessibilityElement(children: .combine)
     }
 
     /// The chosen card, with a holo sheen.
@@ -200,6 +232,7 @@ struct CardStationView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(LinearGradient(colors: [.pokeYellow, Color(red: 1, green: 0.93, blue: 0.6)], startPoint: .top, endPoint: .bottom))
+                    .environment(\.colorScheme, .light)
                     .overlay(RoundedRectangle(cornerRadius: 10).inset(by: 6).stroke(Color.pokeNavy.opacity(0.3), lineWidth: 2))
                 }
             }
@@ -232,8 +265,7 @@ struct CardStationView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(.white, in: .rect(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+        .card()
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
@@ -260,9 +292,8 @@ struct CardStationView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search set, number or rarity", text: $search)
             }
-            .padding(10)
-            .background(.white, in: .capsule)
-            .overlay(Capsule().stroke(Color.pokeNavy.opacity(0.12)))
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(Color(.tertiarySystemFill), in: .capsule)
             .onChange(of: search) { limit = 36 }
 
             filterChips(alternates: alternates, megas: megas)
@@ -279,8 +310,8 @@ struct CardStationView: View {
                         .foregroundStyle(draft.id == baseCard.id ? Color.pokeGreen : .secondary)
                 }
                 .padding(12)
-                .background(.white, in: .rect(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(draft.id == baseCard.id ? Color.pokeGreen : .clear, lineWidth: 2))
+                .card(16)
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(draft.id == baseCard.id ? Color.pokeGreen : .clear, lineWidth: 2))
             }
             .buttonStyle(.plain)
 
@@ -298,12 +329,11 @@ struct CardStationView: View {
             HStack(spacing: 8) {
                 ForEach(CatalogueFilter.allCases.filter { ($0 != .forms || alternates > 0) && ($0 != .mega || megas > 0) }) { option in
                     let active = filter == option
-                    Button { filter = option; limit = 36 } label: {
+                    Button { withAnimation(.snappy) { filter = option }; limit = 36 } label: {
                         Text(option.rawValue).font(.caption.bold())
                             .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(active ? Color.pokeRed : Color.white, in: .capsule)
-                            .foregroundStyle(active ? Color.white : Color.pokeNavy)
-                            .overlay(Capsule().stroke(Color.pokeNavy.opacity(0.12)))
+                            .background(active ? region.accent : Color(.tertiarySystemFill), in: .capsule)
+                            .foregroundStyle(active ? Color.white : Color.primary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(active ? .isSelected : [])
@@ -321,7 +351,7 @@ struct CardStationView: View {
                 PokeBall(size: 40)
                     .phaseAnimator([-18.0, 18.0]) { ball, angle in ball.rotationEffect(.degrees(angle), anchor: .bottom) }
                         animation: { _ in .easeInOut(duration: 0.35) }
-                Text("Loading every known printing…").font(.footnote).foregroundStyle(.secondary)
+                Text("Searching tall grass for every printing…").font(.footnote).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity).padding(30)
         } else if let loadError {
@@ -331,7 +361,7 @@ struct CardStationView: View {
         } else {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 14) {
                 ForEach(visible.prefix(limit)) { card in
-                    Button { draftId = card.id } label: { CardChoice(card: card, sprite: pokemon.spriteURL, chosen: draft.id == card.id) }
+                    Button { draftId = card.id } label: { CardChoice(card: card, sprite: pokemon.spriteURL, chosen: draft.id == card.id, accent: region.accent) }
                         .buttonStyle(.plain)
                 }
             }
@@ -345,7 +375,7 @@ struct CardStationView: View {
 }
 
 private struct CardChoice: View {
-    let card: CardOption, sprite: URL, chosen: Bool
+    let card: CardOption, sprite: URL, chosen: Bool, accent: Color
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -361,7 +391,7 @@ private struct CardChoice: View {
             .overlay(alignment: .topTrailing) {
                 if chosen { PokeBall(size: 22).padding(5).shadow(radius: 3) }
             }
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(chosen ? Color.pokeYellow : .clear, lineWidth: 3) }
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(chosen ? accent : .clear, lineWidth: 3) }
             .scaleEffect(chosen ? 1.03 : 1)
             .animation(.snappy, value: chosen)
 

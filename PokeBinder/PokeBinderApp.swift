@@ -10,8 +10,6 @@ struct PokeBinderApp: App {
                 .environment(store)
                 .tint(.pokeRed)
                 .fontDesign(.rounded)
-                // The Pokédex palette is designed for light surfaces.
-                .preferredColorScheme(.light)
         }
     }
 }

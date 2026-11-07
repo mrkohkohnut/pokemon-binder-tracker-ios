@@ -41,6 +41,7 @@ struct Pokemon: Identifiable, Hashable {
     let name: String
     var dex: String { String(format: "#%04d", id) }
     var spriteURL: URL { URL(string: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/\(id).png")! }
+    var artworkURL: URL { URL(string: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/\(id).png")! }
 
     static let all: [Pokemon] = POKEMON_NAMES.enumerated().map { Pokemon(id: $0.offset + 1, name: $0.element) }
 }
@@ -60,7 +61,9 @@ struct Generation: Identifiable, Hashable {
         .init(id: "galar", label: "Galar · Gen VIII", range: 810...905),
         .init(id: "paldea", label: "Paldea · Gen IX", range: 906...1025),
     ]
-}/// The binder, cached on the device and synced through the web app's `/api/sync` endpoint.
+}
+
+/// The binder, cached on the device and synced through the web app's `/api/sync` endpoint.
 /// Phones share a binder by sharing a sync code, so it works with any signing (FlareStore included),
 /// unlike iCloud, which needs the app signed with your own developer account.
 @Observable @MainActor

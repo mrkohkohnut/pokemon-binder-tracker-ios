@@ -9,15 +9,15 @@ SwiftUI port of [pokemon-binder-tracker](https://github.com/mrkohkohnut/pokemon-
 
 ## Syncing two phones
 
-Local Xcode builds on the Mac mini can sync automatically: each phone joins the same binder on launch. The automated group-release script deliberately omits the shared code, so recipients link manually.
+Local Xcode builds and automated group releases join the same binder automatically on launch; recipients do not enter sync codes or sign in. The release IPA contains the shared sync credential, so anyone who gets a copy can read and edit that binder. Only distribute it to trusted people.
 
-Direct Xcode builds can use `PokeBinder/auto-sync-code.txt`, a shared code that's gitignored because this repo is public. The automated group-release script excludes it. To set it up on a new Mac, create the file with any 20+ letters and digits:
+Direct Xcode builds and group releases use `PokeBinder/auto-sync-code.txt`, a shared credential that's gitignored because this repo is public. It is packaged into the IPA for automatic sync, but never committed to GitHub. To set it up on a new Mac, create the file with any 20+ letters and digits:
 
 ```bash
 python3 -c "import secrets; print(''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(32)))" > PokeBinder/auto-sync-code.txt
 ```
 
-Anyone who has a direct-Xcode build containing the code could extract it, so only share those builds with people you'd let edit your binder. Releases from `Scripts/release.py` omit the code and fall back to manual sync codes: tap the cloud button, **Start syncing this binder** on one phone, then enter the code on the other.
+The credential can be extracted from any app build that contains it. Keep release IPAs private and share them only with people you'd let edit your binder. Manual sync codes remain available for separate binders if needed.
 
 Changes upload straight away. The other phone picks them up within about 15 seconds while the binder is open, when the app comes back to the foreground, or when you pull down to refresh.
 
@@ -35,7 +35,7 @@ cp Server/sync_server.py ~/Library/Application\ Support/PokeBinderSync/ && launc
 
 ## Releasing
 
-On the Mac mini, run `python3 Scripts/release.py` from a clean worktree. It increments the marketing patch and build number in both Xcode configurations, makes a clean unsigned device build, verifies the IPA, excludes the private auto-sync code, sends the version-labelled IPA to the configured Telegram home chat (currently Fat Fatty Fatter), and commits the version bump. Recipients link phones manually in Sync settings.
+On the Mac mini, run `python3 Scripts/release.py` from a clean worktree. It increments the marketing patch and build number in both Xcode configurations, makes a clean unsigned device build, verifies the automatic-sync credential is included, sends the version-labelled IPA to the configured Telegram home chat (currently Fat Fatty Fatter), and commits the version bump. Recipients join the shared binder automatically; anyone with the IPA can access and edit it.
 
 Use `python3 Scripts/release.py --dry-run` to preview the next version. The release command does not push to GitHub; push the release commit separately when ready. Xcode and the Hermes CLI with Telegram configured are required. By default it resolves the exact **Fat Fatty Fatter** group from Hermes's Telegram channel directory; set `POKEBINDER_TELEGRAM_TARGET=telegram:<chat-id>` to override it.
 

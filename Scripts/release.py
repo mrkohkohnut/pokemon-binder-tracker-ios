@@ -120,32 +120,32 @@ def ensure_clean_worktree() -> None:
         raise RuntimeError("Commit or stash all tracked/untracked source changes before releasing. The ignored build/ and auto-sync-code.txt files are not included in this check.")
 
 
-def private_sync_code() -> bytes | None:
+def normalize_sync_code(value: str) -> bytes:
+    return "".join(char for char in value.upper() if char.isalnum()).encode("utf-8")
+
+
+def automatic_sync_code() -> bytes:
     path = ROOT / "PokeBinder" / "auto-sync-code.txt"
     if not path.is_file():
-        return None
-    # Read only in memory for the artifact privacy check; never print or copy it.
-    normalized = "".join(char for char in path.read_text(encoding="utf-8").upper() if char.isalnum())
-    return normalized.encode("utf-8") if len(normalized) >= 20 else None
+        raise RuntimeError("Automatic sync credential is missing; refusing to build a manual-code release.")
+    # Keep the credential in memory; never print or add it to source control.
+    code = normalize_sync_code(path.read_text(encoding="utf-8"))
+    if len(code) < 20:
+        raise RuntimeError("Automatic sync credential is invalid; expected at least 20 letters or digits.")
+    return code
 
 
-def verify_app_privacy(app: Path, secret: bytes | None) -> None:
-    included = [path for path in app.rglob("*") if path.is_file()]
-    named = [path for path in included if path.name == "auto-sync-code.txt"]
-    matches = []
-    if secret:
-        for path in included:
-            try:
-                if secret in path.read_bytes():
-                    matches.append(path.name)
-            except OSError:
-                continue
-    if named or matches:
-        raise RuntimeError("Privacy check failed: the automatic sync code appears in the app bundle.")
-    print("Privacy check: automatic sync code is not in the app bundle.")
+def verify_app_auto_sync(app: Path, secret: bytes) -> None:
+    resource = app / "auto-sync-code.txt"
+    if not resource.is_file():
+        raise RuntimeError("Built app is missing the automatic sync credential.")
+    bundled = normalize_sync_code(resource.read_text(encoding="utf-8"))
+    if bundled != secret:
+        raise RuntimeError("Built app's automatic sync credential does not match the configured shared binder.")
+    print("Automatic sync resource is present and matches the configured shared binder.")
 
 
-def verify_ipa(ipa: Path, marketing: str, build: str, secret: bytes | None) -> None:
+def verify_ipa(ipa: Path, marketing: str, build: str, secret: bytes) -> None:
     with zipfile.ZipFile(ipa) as archive:
         bad_member = archive.testzip()
         if bad_member:
@@ -153,12 +153,15 @@ def verify_ipa(ipa: Path, marketing: str, build: str, secret: bytes | None) -> N
         plist_name = "Payload/PokeBinder.app/Info.plist"
         if plist_name not in archive.namelist():
             raise RuntimeError("IPA is missing Payload/PokeBinder.app/Info.plist.")
-        if any(Path(name).name == "auto-sync-code.txt" for name in archive.namelist()):
-            raise RuntimeError("Privacy check failed: auto-sync-code.txt is in the IPA.")
-        if secret:
-            for name in archive.namelist():
-                if name.startswith("Payload/PokeBinder.app/") and secret in archive.read(name):
-                    raise RuntimeError("Privacy check failed: automatic sync code is embedded in the IPA.")
+        sync_name = "Payload/PokeBinder.app/auto-sync-code.txt"
+        if sync_name not in archive.namelist():
+            raise RuntimeError("IPA is missing the automatic sync credential.")
+        try:
+            bundled = normalize_sync_code(archive.read(sync_name).decode("utf-8"))
+        except UnicodeDecodeError as error:
+            raise RuntimeError("IPA's automatic sync credential is unreadable.") from error
+        if bundled != secret:
+            raise RuntimeError("IPA's automatic sync credential does not match the configured shared binder.")
         info = plistlib.loads(archive.read(plist_name))
         if info.get("CFBundleIdentifier") != BUNDLE_ID:
             raise RuntimeError(f"Unexpected bundle identifier: {info.get('CFBundleIdentifier')!r}.")
@@ -166,12 +169,11 @@ def verify_ipa(ipa: Path, marketing: str, build: str, secret: bytes | None) -> N
             raise RuntimeError("IPA marketing version does not match the project settings.")
         if str(info.get("CFBundleVersion")) != build:
             raise RuntimeError("IPA build number does not match the project settings.")
-        print(f"Verified IPA: {BUNDLE_ID}, version {marketing} (build {build}), ZIP valid, sync code excluded.")
+        print(f"Verified IPA: {BUNDLE_ID}, version {marketing} (build {build}), ZIP valid, automatic sync enabled.")
 
 
-def build_ipa(marketing: str, build: str) -> None:
+def build_ipa(marketing: str, build: str, secret: bytes) -> None:
     app = DERIVED_DATA / "Build" / "Products" / "Release-iphoneos" / "PokeBinder.app"
-    secret = private_sync_code()
     command([
         "xcodebuild", "clean", "build", "-quiet",
         "-project", "PokeBinder.xcodeproj",
@@ -180,13 +182,12 @@ def build_ipa(marketing: str, build: str) -> None:
         "-destination", "generic/platform=iOS",
         "-derivedDataPath", str(DERIVED_DATA),
         "CODE_SIGNING_ALLOWED=NO",
-        "EXCLUDED_SOURCE_FILE_NAMES=auto-sync-code.txt",
         f"MARKETING_VERSION={marketing}",
         f"CURRENT_PROJECT_VERSION={build}",
     ])
     if not app.is_dir():
         raise RuntimeError(f"Xcode did not produce the expected app bundle: {app}")
-    verify_app_privacy(app, secret)
+    verify_app_auto_sync(app, secret)
 
     if STAGE.exists():
         shutil.rmtree(STAGE)
@@ -207,6 +208,7 @@ def main() -> int:
     original = PROJECT_FILE.read_text(encoding="utf-8")
     marketing, build = next_numbers(original)
     target, expected_chat_id = telegram_target()
+    secret = automatic_sync_code()
     if args.dry_run:
         print(f"Next release: Poké Binder v{marketing} (build {build}); Telegram target: {target}.")
         return 0
@@ -217,14 +219,15 @@ def main() -> int:
     PROJECT_FILE.write_text(updated, encoding="utf-8")
 
     try:
-        build_ipa(marketing, build)
+        build_ipa(marketing, build, secret)
     except Exception:
         PROJECT_FILE.write_text(original, encoding="utf-8")
         raise
 
     message = (
         f"Poké Binder v{marketing} (build {build}) — unsigned IPA attached.\n"
-        "Automatic binder sync is disabled in this group build; link phones manually in Sync settings.\n"
+        "Automatic sync is enabled: every copy joins the shared binder with no code entry. "
+        "Anyone with this IPA can access and edit that binder.\n"
         f"MEDIA:{IPA}"
     )
     try:

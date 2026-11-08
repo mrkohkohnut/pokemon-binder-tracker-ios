@@ -134,7 +134,7 @@ struct BinderView: View {
                 withAnimation(.bouncy) { gotcha = pendingGotcha }
                 pendingGotcha = nil
             }) { pokemon in
-                CardStationView(pokemon: pokemon, owned: collection[pokemon.id]) { pendingGotcha = $0 }
+                CardStationView(pokemon: pokemon, owned: collection[pokemon.id], language: language ?? .english) { pendingGotcha = $0 }
             }
         }
         .overlay(alignment: .top) { gotchaBanner }

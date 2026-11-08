@@ -17,11 +17,20 @@ struct CardStationView: View {
     @State private var coverage = ""
     @State private var loading = true
     @State private var loadError: String?
-    @State private var language = CardLanguage.english
+    @State private var language: CardLanguage
+    @State private var catalogues: [CardLanguage: CardService.Catalogue] = [:]
     @State private var draftId: String?
     @State private var search = ""
     @State private var filter = CatalogueFilter.all
     @State private var limit = 36
+
+    init(pokemon: Pokemon, owned: OwnedCard?, language: CardLanguage = .english, onCatch: @escaping (Pokemon) -> Void = { _ in }) {
+        self.pokemon = pokemon
+        self.owned = owned
+        self.onCatch = onCatch
+        _language = State(initialValue: owned?.language ?? language)
+        _draftId = State(initialValue: owned?.cardId)
+    }
 
     private var baseCard: CardOption {
         CardOption(id: "base:\(pokemon.id)", sourceId: "base-\(pokemon.id)", name: "\(pokemon.name) · unlisted card",
@@ -31,7 +40,7 @@ struct CardStationView: View {
 
     /// Catalogue plus a previously saved card that's no longer listed.
     private var selectable: [CardOption] {
-        if let legacy = owned?.card, !cards.contains(where: { $0.id == owned?.cardId }), !legacy.id.hasPrefix("base:") {
+        if let legacy = owned?.card, owned?.language == language, !cards.contains(where: { $0.id == owned?.cardId }), !legacy.id.hasPrefix("base:") {
             return [legacy] + cards
         }
         return cards
@@ -102,7 +111,7 @@ struct CardStationView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { actions }
-            .task { await load() }
+            .task(id: language) { await load() }
         }
         .tint(region.accent)
     }
@@ -144,7 +153,7 @@ struct CardStationView: View {
     private var languagePicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Language printed on your card").font(.caption.bold()).foregroundStyle(.secondary)
-            Picker("Language printed on your card", selection: $language) {
+            Picker("Language printed on your card", selection: $language.animation(.snappy)) {
                 ForEach(CardLanguage.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -152,15 +161,28 @@ struct CardStationView: View {
         }
     }
 
+    /// Each language has its own catalogue, since some cards were only ever printed in one language.
     private func load() async {
-        language = owned?.language ?? .english
-        draftId = owned?.cardId
+        loadError = nil
+        limit = 36
+        // A pick from another language's catalogue doesn't carry over.
+        if !(draftId ?? "").hasPrefix("base:") { draftId = owned?.language == language ? owned?.cardId : nil }
+        if let cached = catalogues[language] {
+            (cards, coverage, loading) = (cached.cards, cached.coverage, false)
+            return
+        }
+        (cards, coverage, loading) = ([], "", true)
+        let wanted = language
         do {
-            let catalogue = try await CardService.catalogue(for: pokemon)
-            cards = catalogue.cards
-            coverage = catalogue.coverage
+            let catalogue = try await CardService.catalogue(for: pokemon, language: wanted)
+            guard wanted == language else { return }
+            catalogues[wanted] = catalogue
+            (cards, coverage) = (catalogue.cards, catalogue.coverage)
+        } catch is CancellationError {
+            return
         } catch {
-            loadError = "The live catalogue is temporarily unavailable."
+            guard wanted == language else { return }
+            loadError = "The \(wanted.rawValue) catalogue is temporarily unavailable."
         }
         loading = false
     }
@@ -297,7 +319,7 @@ struct CardStationView: View {
 
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search set, number or rarity", text: $search)
+                TextField("Search name, set or number", text: $search)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
             .background(Color(.tertiarySystemFill), in: .capsule)
@@ -325,7 +347,7 @@ struct CardStationView: View {
             catalogue(visible)
 
             if !coverage.isEmpty {
-                Text("\(coverage) Catalogue images are artwork references; save the language printed on your physical card separately.")
+                Text(coverage)
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -358,7 +380,7 @@ struct CardStationView: View {
                 PokeBall(size: 40)
                     .phaseAnimator([-18.0, 18.0]) { ball, angle in ball.rotationEffect(.degrees(angle), anchor: .bottom) }
                         animation: { _ in .easeInOut(duration: 0.35) }
-                Text("Searching tall grass for every printing…").font(.footnote).foregroundStyle(.secondary)
+                Text("Searching tall grass for every \(language.rawValue) printing…").font(.footnote).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity).padding(30)
         } else if let loadError {

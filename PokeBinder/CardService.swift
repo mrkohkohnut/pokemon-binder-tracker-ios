@@ -1,8 +1,32 @@
 import Foundation
 
-/// Port of the web app's /api/cards route, calling TCGdex directly.
+/// Card catalogues per printed language, each from the source that actually has that language's cards:
+/// English from TCGdex, Japanese from the official pokemon-card.com search, Chinese from the official
+/// Traditional Chinese (Taiwan/Hong Kong) card search at asia.pokemon-card.com.
 enum CardService {
     struct Catalogue { var cards: [CardOption]; var coverage: String }
+
+
+    static func catalogue(for pokemon: Pokemon, language: CardLanguage) async throws -> Catalogue {
+        switch language {
+        case .english: return try await catalogue(for: pokemon)
+        case .japanese: return try await LocalCatalogues.japanese(pokemon)
+        case .chinese: return try await LocalCatalogues.chinese(pokemon)
+        case .korean:
+            // No public Korean card database; Korean sets mirror the Japanese ones, so show those pictures.
+            var catalogue = try await LocalCatalogues.japanese(pokemon)
+            catalogue.cards = catalogue.cards.map { card in
+                var card = card
+                card.name = card.name.replacingOccurrences(of: pokemon.name(in: .japanese), with: pokemon.name(in: .korean)) // Keeps ex, V…
+                card.setName = "Korean · \(card.setCode) (Japanese picture)"
+                card.rarity = "Korean printing"
+                card.language = CardLanguage.korean.rawValue
+                return card
+            }
+            catalogue.coverage = "Korean catalogue: \(catalogue.cards.count) printings, shown with the matching Japanese card pictures."
+            return catalogue
+        }
+    }
 
     private struct GraphCard: Decodable {
         struct CardSet: Decodable { let id: String; let name: String; let releaseDate: String? }
@@ -25,7 +49,7 @@ enum CardService {
     }
     """
 
-    static func catalogue(for pokemon: Pokemon) async throws -> Catalogue {
+    private static func catalogue(for pokemon: Pokemon) async throws -> Catalogue {
         var cards: [CardOption]
         var expanded = true
         do {
@@ -41,8 +65,8 @@ enum CardService {
             " \(alternates) alternate-form artwork\(alternates == 1 ? " is" : "s are") grouped under \(pokemon.name)" +
             (mega > 0 ? ", including \(mega) Mega Evolution card\(mega == 1 ? "" : "s")" : "") + "."
         let coverage = expanded
-            ? "Expanded master catalogue: \(cards.count) known printings, including regular cards, illustration rares, promos and special releases.\(forms)"
-            : "Master catalogue fallback: \(cards.count) known printings.\(forms) Some set and rarity details are temporarily unavailable."
+            ? "English catalogue from TCGdex: \(cards.count) printings, including regular cards, illustration rares, promos and special releases.\(forms)"
+            : "English catalogue (fallback): \(cards.count) printings.\(forms) Some set and rarity details are temporarily unavailable."
         return Catalogue(cards: cards, coverage: coverage)
     }
 
@@ -95,7 +119,7 @@ enum CardService {
             rarity: card.rarity?.isEmpty == false ? card.rarity! : "Unlisted rarity",
             imageUrl: image(card.image, "low"), imageLargeUrl: image(card.image, "high"),
             illustrator: card.illustrator, releaseDate: card.set.releaseDate,
-            language: "Artwork reference", form: form, formLabel: label
+            language: CardLanguage.english.rawValue, form: form, formLabel: label
         )
     }
 
@@ -106,7 +130,7 @@ enum CardService {
             id: "tcgdex:\(card.id)", sourceId: card.id, name: card.name,
             setName: setCode, setCode: setCode, number: card.localId, rarity: "Catalogue card",
             imageUrl: image(card.image, "low"), imageLargeUrl: image(card.image, "high"),
-            illustrator: nil, releaseDate: nil, language: "Artwork reference", form: form, formLabel: label
+            illustrator: nil, releaseDate: nil, language: CardLanguage.english.rawValue, form: form, formLabel: label
         )
     }
 

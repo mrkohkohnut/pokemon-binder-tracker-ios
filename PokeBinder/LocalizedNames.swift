@@ -266,3 +266,11 @@ let CHINESE_NAMES: [String] = [
     "波盪水", "鐵斑葉", "裹蜜蟲", "斯魔茶", "來悲粗茶", "夠讚狗", "願增猿", "吉雉雞", "厄鬼椪", "鋁鋼橋龍", "蜜集大蛇", "破空焰",
     "猛雷鼓", "鐵磐岩", "鐵頭殼", "太樂巴戈斯", "桃歹郎",
 ]
+
+/// Spellings the official Traditional Chinese card site uses where they differ from the Pokédex names above,
+/// searched as well so those cards aren't missed. Found by checking every Pokémon card on the site
+/// (11,539 cards) against a search for each name.
+let CHINESE_CARD_NAMES: [Int: [String]] = [
+    956: ["超能豔鴕"], // Espathra: 豔, not 艷
+    983: ["仆斬將軍"], // Kingambit: 仆斬, not 仆刀
+]

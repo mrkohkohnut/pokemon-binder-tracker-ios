@@ -111,6 +111,15 @@ final class CollectionStore {
         changed()
     }
 
+    /// Fills in the rarity of a saved card (it was saved before rarity was tracked).
+    func markRarity(_ rarity: String, for pokemonId: Int) {
+        guard var entry = owned[pokemonId], var card = entry.card, card.rarity != rarity else { return }
+        card.rarity = rarity
+        entry.card = card
+        owned[pokemonId] = entry
+        changed()
+    }
+
     func remove(_ pokemonId: Int) {
         owned[pokemonId] = nil
         changed()

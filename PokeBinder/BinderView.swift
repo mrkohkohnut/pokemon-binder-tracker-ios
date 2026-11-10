@@ -1,12 +1,13 @@
 import SwiftUI
 
 enum StatusFilter: String, CaseIterable, Identifiable {
-    case all = "All", caught = "Caught", missing = "Missing"
+    case all = "All", caught = "Caught", missing = "Missing", needAR = "Need AR"
     var id: String { rawValue }
 }
 
 struct BinderView: View {
     @Environment(CollectionStore.self) private var store
+    @Environment(ARIndex.self) private var arIndex
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSync = false
     @State private var query = ""
@@ -31,7 +32,9 @@ struct BinderView: View {
             let owned = collection[p.id]
             return generation.range.contains(p.id)
                 && (q.isEmpty || p.name.lowercased().contains(q) || String(format: "%04d", p.id).contains(q))
-                && (status == .all || (status == .caught) == (owned != nil))
+                && (status == .all
+                    || (status == .needAR ? owned.map { ARGoal(owned: $0, index: arIndex, pokemonId: p.id) == .upgrade } ?? false
+                                          : (status == .caught) == (owned != nil)))
                 && (language == nil || owned?.language == language)
         }
     }
@@ -48,6 +51,9 @@ struct BinderView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     TrainerCard(region: generation, caught: collection.keys.filter(generation.range.contains).count)
+                        .padding(.horizontal)
+
+                    ARGoalBar(owned: collection.filter { generation.range.contains($0.key) })
                         .padding(.horizontal)
 
                     RegionBadges(collection: collection, selection: $generation)
@@ -121,6 +127,8 @@ struct BinderView: View {
                     try? await Task.sleep(for: .seconds(15))
                 }
             }
+            // Check new catches (and cards swapped to another language) for whether an AR exists.
+            .task(id: collection.mapValues(\.language)) { await arIndex.scan(store) }
             .onChange(of: scenePhase) { if scenePhase == .active { Task { await store.pull() } } }
             .sheet(isPresented: $showSync) { SyncView() }
             .searchable(text: $query, prompt: "Name or Pokédex number")
@@ -412,9 +420,12 @@ struct PocketPressStyle: ButtonStyle {
 private struct Pocket: View {
     let pokemon: Pokemon
     let owned: OwnedCard?
+    @Environment(ARIndex.self) private var arIndex
 
     var body: some View {
         let accent = Generation.of(pokemon.id).accent
+        let tier = owned?.card?.tier ?? .base
+        let goal = owned.map { ARGoal(owned: $0, index: arIndex, pokemonId: pokemon.id) }
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
         VStack(spacing: 6) {
@@ -440,7 +451,8 @@ private struct Pocket: View {
             }
             .overlay {
                 if owned != nil {
-                    shape.strokeBorder(accent, lineWidth: 2)
+                    // The card's rarity at a glance; plain cards keep the region colour.
+                    if tier > .base { shape.strokeBorder(tier.border, lineWidth: tier.lineWidth) } else { shape.strokeBorder(accent, lineWidth: 2) }
                 } else {
                     shape.strokeBorder(Color(.separator), style: .init(lineWidth: 1, dash: [4, 3]))
                 }
@@ -454,6 +466,9 @@ private struct Pocket: View {
             .overlay(alignment: .topTrailing) {
                 if owned != nil { PokeBall(size: 16).padding(5).shadow(color: .black.opacity(0.25), radius: 2, y: 1) }
             }
+            .overlay(alignment: .bottomLeading) {
+                if let goal { GoalBadge(goal: goal, card: owned?.card).padding(4) }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if owned?.card?.imageUrl != nil {
                     Sprite(url: pokemon.spriteURL).frame(width: 28, height: 28)
@@ -466,7 +481,98 @@ private struct Pocket: View {
                 .foregroundStyle(owned == nil ? .secondary : .primary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(pokemon.name), \(pokemon.dex), \(owned == nil ? "missing" : "collected")")
+        .accessibilityLabel("\(pokemon.name), \(pokemon.dex), \(owned == nil ? "missing" : "collected")\(goal?.spoken ?? "")")
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+// MARK: - AR goal
+
+/// Corner badge on a caught pocket: the AR is in, there's an AR to upgrade to, or no AR exists (maxed).
+private struct GoalBadge: View {
+    let goal: ARGoal
+    let card: CardOption?
+
+    var body: some View {
+        switch goal {
+        case .gotAR:
+            if let card { RarityChip(card: card) }
+        case .maxed:
+            Label("MAX", systemImage: "crown.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 8, weight: .black, design: .rounded))
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(RarityTier.ultra.border, in: .capsule)
+                .foregroundStyle(Color.pokeInk)
+                .shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+        case .upgrade:
+            HStack(spacing: 3) {
+                if let card { RarityChip(card: card) }
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white, Color.black.opacity(0.55))
+            }
+        case .unknown:
+            if let card { RarityChip(card: card) }
+        }
+    }
+}
+
+extension ARGoal {
+    var spoken: String {
+        switch self {
+        case .gotAR: ", AR collected"
+        case .maxed: ", maxed, no AR exists"
+        case .upgrade: ", an AR exists to upgrade to"
+        case .unknown: ""
+        }
+    }
+}
+
+/// Progress toward an AR in every pocket, with a button to re-check every caught Pokémon.
+private struct ARGoalBar: View {
+    let owned: [Int: OwnedCard]
+    @Environment(ARIndex.self) private var arIndex
+    @Environment(CollectionStore.self) private var store
+
+    var body: some View {
+        let goals = owned.map { ARGoal(owned: $0.value, index: arIndex, pokemonId: $0.key) }
+        let got = goals.filter { $0 == .gotAR }.count, maxed = goals.filter { $0 == .maxed }.count
+        let upgrade = goals.filter { $0 == .upgrade }.count
+
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("AR GOAL").font(.caption2.weight(.heavy)).tracking(0.8).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    stat("\(got)", "AR", RarityTier.art.border)
+                    stat("\(maxed)", "maxed", RarityTier.ultra.border)
+                    stat("\(upgrade)", "to upgrade", AnyShapeStyle(Color.secondary))
+                }
+            }
+            Spacer(minLength: 0)
+            if case .scanning(let done, let total) = arIndex.progress {
+                VStack(spacing: 2) {
+                    ProgressView(value: Double(done), total: Double(max(total, 1))).frame(width: 70)
+                    Text("Checking \(done)/\(total)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            } else {
+                Button { Task { await arIndex.scan(store, force: true) } } label: {
+                    Label("Rescan", systemImage: "arrow.clockwise")
+                }
+                .font(.caption.bold())
+                .secondaryButton()
+                .accessibilityHint("Checks every caught Pokémon again for AR printings")
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .card(20)
+    }
+
+    private func stat(_ value: String, _ label: String, _ style: AnyShapeStyle) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(style).frame(width: 9, height: 9)
+            Text(value).font(.subheadline.bold().monospacedDigit())
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

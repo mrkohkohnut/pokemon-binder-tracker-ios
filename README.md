@@ -45,6 +45,30 @@ Use `python3 Scripts/release.py --dry-run` to preview the next version. The rele
 - Progress header
 - Card station: card catalogue from the live [TCGdex](https://tcgdex.net) API (GraphQL with a REST fallback), grouping of Mega, regional, paired and special forms, catalogue search and filter chips, a manual "unlisted card" option, and a choice of card language
 
+## Rarity and the AR goal
+
+- Every card and pocket has a border showing its rarity:
+  - **AR** (Illustration Rare / アートレア): rainbow
+  - **SAR**: pink to violet
+  - **SR, UR, HR and other gold-tier cards**: gold
+  - **RR and other double rares**: silver
+  - **Common, uncommon and rare**: no special border
+- Where the rarity comes from:
+  - **English:** TCGdex's rarity names.
+  - **Japanese:** the official site's hidden rarity filters (`sc_rare_ar=1`, …).
+  - **Chinese:** the official site's `rarity[]` filter.
+  - **Korean:** the matching Japanese cards.
+- A caught pocket shows where it stands against the goal of having an AR for every Pokémon:
+  - the AR chip if your card is an AR;
+  - an up arrow if an AR exists in that language to upgrade to;
+  - a gold **MAX** crown if no AR exists for that Pokémon in that language, so the card you have is already the best you can get.
+- The **AR goal** bar counts these states, and **Need AR** in the status filter lists the pockets you can still upgrade.
+- How the AR check works:
+  - Each caught Pokémon is checked in its card's language with one small search.
+  - The check re-runs weekly, or straight away with **Rescan**.
+  - Opening a Pokémon also refreshes the rarity of the card you saved.
+- TCG Pocket (phone game) cards are left out of the English catalogue.
+
 ## Differences from the web app
 
 - The collection syncs through your own `/api/sync` server (the Mac mini by default) with a sync code, not iCloud or a ChatGPT sign-in. iCloud only works when the app is signed with your own Apple Developer account, so re-signed IPAs (such as FlareStore) can't use it. The phones' binder is stored separately from the binder of the ChatGPT account signed in on the website.

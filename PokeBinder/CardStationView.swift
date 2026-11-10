@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum CatalogueFilter: String, CaseIterable, Identifiable {
-    case all = "All", forms = "Forms", mega = "Mega", art = "Art rares", promo = "Promos", pictured = "With image"
+    case all = "All", art = "AR & SAR", forms = "Forms", mega = "Mega", rare = "Other rares", promo = "Promos", pictured = "With image"
     var id: String { rawValue }
 }
 
@@ -9,6 +9,7 @@ struct CardStationView: View {
     let pokemon: Pokemon
     let owned: OwnedCard?
     @Environment(CollectionStore.self) private var store
+    @Environment(ARIndex.self) private var arIndex
     var onCatch: (Pokemon) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var width: CGFloat = 0
@@ -60,7 +61,8 @@ struct CardStationView: View {
             case .all: true
             case .forms: card.isAlternateForm
             case .mega: card.form == .mega
-            case .art: ["illustration", "character", "secret", "hyper", "ultra rare", "shiny", "amazing", "crown"].contains { rarity.contains($0) }
+            case .art: card.tier >= .specialArt
+            case .rare: card.tier == .double || card.tier == .ultra
             case .promo: rarity.contains("promo") || card.setName.lowercased().contains("promo")
             case .pictured: card.imageUrl != nil
             }
@@ -177,6 +179,11 @@ struct CardStationView: View {
             let catalogue = try await CardService.catalogue(for: pokemon, language: wanted)
             guard wanted == language else { return }
             catalogues[wanted] = catalogue
+            arIndex.noteAR(in: catalogue.cards, for: pokemon.id, language: wanted)
+            // Fill in the rarity of a card saved before rarity was tracked, so its pocket gets the right border.
+            if let owned, owned.language == wanted, let fresh = catalogue.cards.first(where: { $0.id == owned.cardId }) {
+                store.markRarity(fresh.rarity, for: pokemon.id)
+            }
             (cards, coverage) = (catalogue.cards, catalogue.coverage)
         } catch is CancellationError {
             return
@@ -279,6 +286,11 @@ struct CardStationView: View {
             VStack(spacing: 6) {
                 HStack(spacing: 6) {
                     if card.isAlternateForm { Tag(text: card.formLabel ?? "Alternate Form", color: card.form == .mega ? .megaViolet : .pokeBlue) }
+                    if card.tier > .base, let code = card.rarityCode {
+                        Text(code).font(.caption2.weight(.black)).padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(card.tier.border, in: .capsule)
+                            .foregroundStyle(card.tier == .double || card.tier == .ultra ? Color.pokeInk : .white)
+                    }
                     Tag(text: card.rarity, color: .orange)
                 }
                 Text(card.name).font(.headline).multilineTextAlignment(.center)
@@ -420,7 +432,12 @@ private struct CardChoice: View {
             .overlay(alignment: .topTrailing) {
                 if chosen { PokeBall(size: 22).padding(5).shadow(radius: 3) }
             }
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(chosen ? accent : .clear, lineWidth: 3) }
+            // Rarity border at a glance; the chosen card gets the region colour on top.
+            .overlay {
+                if card.tier > .base { RoundedRectangle(cornerRadius: 8).strokeBorder(card.tier.border, lineWidth: card.tier.lineWidth) }
+            }
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(chosen ? accent : .clear, lineWidth: 3).padding(chosen && card.tier > .base ? -3 : 0) }
+            .overlay(alignment: .topLeading) { RarityChip(card: card).padding(4) }
             .scaleEffect(chosen ? 1.03 : 1)
             .animation(.snappy, value: chosen)
 

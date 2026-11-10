@@ -19,13 +19,43 @@ enum CardService {
                 var card = card
                 card.name = card.name.replacingOccurrences(of: pokemon.name(in: .japanese), with: pokemon.name(in: .korean)) // Keeps ex, V…
                 card.setName = "Korean · \(card.setCode) (Japanese picture)"
-                card.rarity = "Korean printing"
                 card.language = CardLanguage.korean.rawValue
                 return card
             }
             catalogue.coverage = "Korean catalogue: \(catalogue.cards.count) printings, shown with the matching Japanese card pictures."
             return catalogue
         }
+    }
+
+    /// Ids (as in `CardOption.id`) of this Pokémon's ARs (Illustration Rares) in that language. Empty: no AR exists.
+    static func artRareIDs(_ pokemon: Pokemon, language: CardLanguage) async throws -> Set<String> {
+        switch language {
+        case .english:
+            struct Hit: Decodable { let id: String; let name: String; let category: String? }
+            struct Response: Decodable { struct Body: Decodable { let d: [Hit]; let n: [Hit] }; let data: Body }
+            var request = URLRequest(url: URL(string: "https://api.tcgdex.net/v2/graphql")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "query": """
+                query($d: Int!, $n: String!) {
+                  d: cards(filters: { dexId: $d, rarity: "Illustration rare" }) { id name category }
+                  n: cards(filters: { name: $n, rarity: "Illustration rare" }) { id name category }
+                }
+                """,
+                "variables": ["d": pokemon.id, "n": pokemon.name] as [String: Any],
+            ] as [String: Any])
+            let body: Response = try await fetch(request)
+            let named = body.data.n.filter { $0.category == "Pokemon" && nameIncludes($0.name, pokemon.name) }
+            return Set((body.data.d + named).map { "tcgdex:\($0.id)" })
+        case .japanese, .korean: return try await LocalCatalogues.japaneseArtRareIDs(pokemon)
+        case .chinese: return try await LocalCatalogues.chineseArtRareIDs(pokemon)
+        }
+    }
+
+    /// TCG Pocket (the phone game) cards live in TCGdex too, but can't go in a binder.
+    private static func isPocketSet(_ setCode: String) -> Bool {
+        setCode.wholeMatch(of: /[AB]\d+[a-z]?|P-[A-Z]/) != nil
     }
 
     private struct GraphCard: Decodable {
@@ -83,6 +113,7 @@ enum CardService {
         let dex = dexCards.filter { $0.category == nil || $0.category == "Pokemon" }
         let named = (payload.data?.namedCards ?? []).filter { $0.category == "Pokemon" && nameIncludes($0.name, pokemon.name) }
         return sorted(merge(dex.map { fromGraph($0, pokemon.name) }, named.map { fromGraph($0, pokemon.name) }))
+            .filter { !isPocketSet($0.setCode) }
     }
 
     private static func fallbackCatalogue(_ pokemon: Pokemon) async throws -> [CardOption] {
@@ -90,6 +121,7 @@ enum CardService {
         let dex: [CardBrief] = try await fetch(URLRequest(url: URL(string: "https://api.tcgdex.net/v2/en/cards?dexId=eq:\(pokemon.id)")!))
         let namedCards = await named.filter { nameIncludes($0.name, pokemon.name) }
         return sorted(merge(dex.map { fromBrief($0, pokemon.name) }, namedCards.map { fromBrief($0, pokemon.name) }))
+            .filter { !isPocketSet($0.setCode) }
     }
 
     private static func namedBriefs(_ pokemon: Pokemon) async -> [CardBrief] {
@@ -99,7 +131,7 @@ enum CardService {
         return briefs ?? []
     }
 
-    private static func fetch<T: Decodable>(_ request: URLRequest) async throws -> T {
+    static func fetch<T: Decodable>(_ request: URLRequest) async throws -> T {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         return try JSONDecoder().decode(T.self, from: data)

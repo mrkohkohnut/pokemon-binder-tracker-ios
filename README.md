@@ -45,6 +45,21 @@ Use `python3 Scripts/release.py --dry-run` to preview the next version. The rele
 - Progress header
 - Card station: card catalogue from the live [TCGdex](https://tcgdex.net) API (GraphQL with a REST fallback), grouping of Mega, regional, paired and special forms, catalogue search and filter chips, a manual "unlisted card" option, and a choice of card language
 
+## Card sources and local storage
+
+| Language | Sources |
+|---|---|
+| English | [TCGdex](https://tcgdex.net) (checked against pokemontcg.io: TCGdex had every card it had, and more) |
+| Japanese | Official [pokemon-card.com](https://www.pokemon-card.com/card-search/) search, plus TCGdex for older sets the official site doesn't carry (1996 Base Set, Neo, e-Card…; most have no picture) |
+| Chinese | Official Traditional Chinese search at [asia.pokemon-card.com/tw](https://asia.pokemon-card.com/tw/card-search/), plus TCGdex's Simplified Chinese (mainland) cards |
+| Korean | The matching Japanese sets, with Japanese pictures |
+
+Everything the app shows is stored on the phone, in Application Support (excluded from backups):
+- **Images:** every card picture, sprite and artwork is downloaded once and kept.
+- **Catalogues:** each Pokémon's catalogue is saved per language. It's read from the phone and fetched again from the card sources once it's a week old. **Check now** in the card picker fetches it straight away.
+- **New cards:** cards that appeared since the previous check are marked **NEW**.
+- **Offline:** if a source is down, the saved copy is used.
+
 ## Rarity and the AR goal
 
 - Every card and pocket has a border showing its rarity:

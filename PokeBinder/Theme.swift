@@ -93,7 +93,7 @@ struct Sprite: View {
     var pixelated = true
 
     var body: some View {
-        AsyncImage(url: url) { image in
+        CachedImage(url: url) { image in
             if silhouette {
                 // "Who's that Pokémon?" for pockets still to catch.
                 // Template rendering keeps the shape and adapts to light and dark mode.

@@ -21,6 +21,7 @@ enum LocalCatalogues {
         async let rarities = rarityCodes(japaneseRarities) { code in
             try await japaneseCards(name, extra: [.init(name: "sc_rare_\(code)", value: "1")]).map(\.cardID)
         }
+        async let olderSets = tcgdex("ja", pokemon: pokemon, language: .japanese, label: "Japanese")
         let found = try await japaneseCards(name)
         let codes = await rarities
         let cards = found.map { card -> CardOption in
@@ -35,7 +36,12 @@ enum LocalCatalogues {
                               imageUrl: image, imageLargeUrl: image, language: CardLanguage.japanese.rawValue,
                               form: form, formLabel: label)
         }
-        return .init(cards: unique(cards), coverage: "Japanese catalogue from the official Pokémon Card Game site: \(cards.count) printings.")
+        // TCGdex goes back to 1996; keep only sets the official site has nothing from for this Pokémon,
+        // so a card isn't listed twice. (Sources share set codes but not card numbers.)
+        let officialSets = Set(cards.map { $0.setCode.uppercased() })
+        let older = await olderSets.filter { !officialSets.contains($0.setCode.uppercased()) }
+        return .init(cards: unique(cards + older),
+                     coverage: "Japanese catalogue: \(cards.count) printings from the official Pokémon Card Game site, plus \(older.count) from older sets via TCGdex.")
     }
 
     static func japaneseArtRareIDs(_ pokemon: Pokemon) async throws -> Set<String> {
@@ -76,6 +82,8 @@ enum LocalCatalogues {
         async let rarities = rarityCodes(chineseRarities) { code in
             try await chineseIDs(keywords, extra: [.init(name: "rarity[]", value: code)])
         }
+        async let simplified = tcgdex("zh-cn", pokemon: pokemon, language: .chinese, label: "Simplified Chinese",
+                                      name: simplifiedName(name))
         let ids = try await chineseIDs(keywords).sorted { Int($0) ?? 0 > Int($1) ?? 0 } // Newest first, like the other catalogues.
         let codes = await rarities
         let cards = ids.map { id in
@@ -84,8 +92,9 @@ enum LocalCatalogues {
                               setCode: "TW", number: id, rarity: codes[id] ?? "Chinese printing", imageUrl: image, imageLargeUrl: image,
                               language: CardLanguage.chinese.rawValue, form: .standard, formLabel: "Base Species")
         }
-        return .init(cards: cards,
-                     coverage: "Chinese catalogue from the official Traditional Chinese card search (Taiwan and Hong Kong): \(cards.count) printings.")
+        let mainland = await simplified
+        return .init(cards: cards + mainland,
+                     coverage: "Chinese catalogue: \(cards.count) Traditional Chinese printings from the official Taiwan and Hong Kong card search, plus \(mainland.count) Simplified Chinese (mainland) printings via TCGdex.")
     }
 
     static func chineseArtRareIDs(_ pokemon: Pokemon) async throws -> Set<String> {
@@ -142,6 +151,34 @@ enum LocalCatalogues {
             for id in found[i] ?? [] where labels[id] == nil { labels[id] = rarity.label }
         }
         return labels
+    }
+
+    // MARK: TCGdex (older Japanese sets, Korean and Simplified Chinese cards)
+
+    private struct TCGdexBrief: Decodable { let id: String; let localId: String; let name: String; let image: String? }
+
+    /// Cards named after this Pokémon in one of TCGdex's languages. Empty when TCGdex can't be reached,
+    /// since these only add to the main source.
+    static func tcgdex(_ lang: String, pokemon: Pokemon, language: CardLanguage, label: String, name: String? = nil) async -> [CardOption] {
+        let name = name ?? pokemon.name(in: language)
+        var url = URLComponents(string: "https://api.tcgdex.net/v2/\(lang)/cards")!
+        url.queryItems = [.init(name: "name", value: name)]
+        guard let briefs: [TCGdexBrief] = try? await fetchJSON(url.url!) else { return [] }
+        let others = language == .chinese ? CHINESE_NAMES.map(simplifiedName) : language == .korean ? KOREAN_NAMES : JAPANESE_NAMES
+        return briefs.filter { names($0.name, include: name, of: others) }.map { card in
+            let set = card.id.range(of: "-", options: .backwards).map { String(card.id[..<$0.lowerBound]) } ?? card.id
+            let (form, formLabel) = classify(card.name, name, language: language)
+            return CardOption(id: "tcgdex-\(lang):\(card.id)", sourceId: "\(lang)-\(card.id)", name: card.name,
+                              setName: "\(label) · \(set)", setCode: set, number: card.localId, rarity: "\(label) printing",
+                              imageUrl: card.image.flatMap { URL(string: "\($0)/low.webp") },
+                              imageLargeUrl: card.image.flatMap { URL(string: "\($0)/high.webp") },
+                              language: language.rawValue, form: form, formLabel: formLabel)
+        }
+    }
+
+    /// Mainland cards print Simplified characters (妙蛙種子 → 妙蛙种子).
+    static func simplifiedName(_ traditional: String) -> String {
+        traditional.applyingTransform(StringTransform("Hant-Hans"), reverse: false) ?? traditional
     }
 
     // MARK: Helpers

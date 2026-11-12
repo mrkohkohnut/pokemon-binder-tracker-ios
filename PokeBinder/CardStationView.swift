@@ -164,19 +164,19 @@ struct CardStationView: View {
     }
 
     /// Each language has its own catalogue, since some cards were only ever printed in one language.
-    private func load() async {
+    private func load(refresh: Bool = false) async {
         loadError = nil
         limit = 36
         // A pick from another language's catalogue doesn't carry over.
         if !(draftId ?? "").hasPrefix("base:") { draftId = owned?.language == language ? owned?.cardId : nil }
-        if let cached = catalogues[language] {
+        if !refresh, let cached = catalogues[language] {
             (cards, coverage, loading) = (cached.cards, cached.coverage, false)
             return
         }
         (cards, coverage, loading) = ([], "", true)
         let wanted = language
         do {
-            let catalogue = try await CardService.catalogue(for: pokemon, language: wanted)
+            let catalogue = try await CardService.catalogue(for: pokemon, language: wanted, refresh: refresh)
             guard wanted == language else { return }
             catalogues[wanted] = catalogue
             arIndex.noteAR(in: catalogue.cards, for: pokemon.id, language: wanted)
@@ -258,7 +258,7 @@ struct CardStationView: View {
         return VStack(spacing: 12) {
             Group {
                 if let url = card.imageLargeUrl ?? card.imageUrl {
-                    AsyncImage(url: url) { $0.resizable().scaledToFit() } placeholder: { ProgressView() }
+                    CachedImage(url: url) { $0.resizable().scaledToFit() } placeholder: { ProgressView() }
                 } else {
                     VStack(spacing: 6) {
                         PokeBall(size: 28)
@@ -358,6 +358,14 @@ struct CardStationView: View {
 
             catalogue(visible)
 
+            if let saved = catalogues[language], !loading {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Saved on this phone · checked \(saved.fetchedAt.formatted(.relative(presentation: .named))). Checks for new cards weekly.")
+                    Spacer(minLength: 8)
+                    Button("Check now") { Task { await load(refresh: true) } }.font(.caption2.bold())
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
             if !coverage.isEmpty {
                 Text(coverage)
                     .font(.caption2).foregroundStyle(.secondary)
@@ -402,7 +410,10 @@ struct CardStationView: View {
         } else {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 14) {
                 ForEach(visible.prefix(limit)) { card in
-                    Button { draftId = card.id } label: { CardChoice(card: card, sprite: pokemon.spriteURL, chosen: draft.id == card.id, accent: region.accent) }
+                    Button { draftId = card.id } label: {
+                        CardChoice(card: card, sprite: pokemon.spriteURL, chosen: draft.id == card.id, accent: region.accent,
+                                   isNew: catalogues[language]?.newSinceLastCheck.contains(card.id) == true)
+                    }
                         .buttonStyle(.plain)
                 }
             }
@@ -417,12 +428,13 @@ struct CardStationView: View {
 
 private struct CardChoice: View {
     let card: CardOption, sprite: URL, chosen: Bool, accent: Color
+    var isNew = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Group {
                 if let url = card.imageUrl {
-                    AsyncImage(url: url) { $0.resizable().scaledToFit() } placeholder: { Color.black.opacity(0.06) }
+                    CachedImage(url: url) { $0.resizable().scaledToFit() } placeholder: { Color.black.opacity(0.06) }
                 } else {
                     Sprite(url: sprite).padding().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black.opacity(0.06))
                 }
@@ -438,6 +450,13 @@ private struct CardChoice: View {
             }
             .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(chosen ? accent : .clear, lineWidth: 3).padding(chosen && card.tier > .base ? -3 : 0) }
             .overlay(alignment: .topLeading) { RarityChip(card: card).padding(4) }
+            .overlay(alignment: .bottomLeading) {
+                if isNew {
+                    Text("NEW").font(.system(size: 8, weight: .black, design: .rounded))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.pokeRed, in: .capsule).foregroundStyle(.white).padding(4)
+                }
+            }
             .scaleEffect(chosen ? 1.03 : 1)
             .animation(.snappy, value: chosen)
 

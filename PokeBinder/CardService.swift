@@ -1,19 +1,48 @@
 import Foundation
 
-/// Card catalogues per printed language, each from the source that actually has that language's cards:
-/// English from TCGdex, Japanese from the official pokemon-card.com search, Chinese from the official
-/// Traditional Chinese (Taiwan/Hong Kong) card search at asia.pokemon-card.com.
+/// Card catalogues per printed language, each from the sources that actually have that language's cards:
+/// - English: TCGdex.
+/// - Japanese: the official pokemon-card.com search, plus TCGdex for older sets it doesn't carry (1996 onwards).
+/// - Chinese: the official Traditional Chinese (Taiwan/Hong Kong) search at asia.pokemon-card.com,
+///   plus TCGdex's Simplified Chinese (mainland) cards.
+/// - Korean: the matching Japanese sets, with Japanese pictures.
 enum CardService {
-    struct Catalogue { var cards: [CardOption]; var coverage: String }
+    struct Catalogue: Codable {
+        var cards: [CardOption]
+        var coverage: String
+        var fetchedAt = Date.now
+        /// Cards that weren't there at the previous weekly check.
+        var newSinceLastCheck: Set<String> = []
+    }
+
+    /// The saved catalogue while it's under a week old; otherwise fetched from the card sources and saved.
+    /// Falls back to the saved copy, however old, when the sources can't be reached.
+    static func catalogue(for pokemon: Pokemon, language: CardLanguage, refresh: Bool = false) async throws -> Catalogue {
+        let saved = CatalogueCache.load(pokemon.id, language)
+        if let saved, !refresh, Date.now.timeIntervalSince(saved.fetchedAt) < CatalogueCache.maxAge { return saved }
+        do {
+            var fresh = try await download(pokemon, language: language)
+            if let saved {
+                let before = Set(saved.cards.map(\.id))
+                fresh.newSinceLastCheck = Set(fresh.cards.map(\.id)).subtracting(before)
+            }
+            CatalogueCache.save(fresh, pokemon.id, language)
+            return fresh
+        } catch {
+            if let saved { return saved }
+            throw error
+        }
+    }
 
 
-    static func catalogue(for pokemon: Pokemon, language: CardLanguage) async throws -> Catalogue {
+    private static func download(_ pokemon: Pokemon, language: CardLanguage) async throws -> Catalogue {
         switch language {
-        case .english: return try await catalogue(for: pokemon)
+        case .english: return try await english(pokemon)
         case .japanese: return try await LocalCatalogues.japanese(pokemon)
         case .chinese: return try await LocalCatalogues.chinese(pokemon)
         case .korean:
-            // No public Korean card database; Korean sets mirror the Japanese ones, so show those pictures.
+            // No Korean card database with pictures (TCGdex has a few hundred Korean cards, without images);
+            // Korean sets mirror the Japanese ones, so show those pictures.
             var catalogue = try await LocalCatalogues.japanese(pokemon)
             catalogue.cards = catalogue.cards.map { card in
                 var card = card
@@ -79,7 +108,7 @@ enum CardService {
     }
     """
 
-    private static func catalogue(for pokemon: Pokemon) async throws -> Catalogue {
+    private static func english(_ pokemon: Pokemon) async throws -> Catalogue {
         var cards: [CardOption]
         var expanded = true
         do {

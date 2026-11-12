@@ -436,7 +436,7 @@ private struct Pocket: View {
                     shape.fill(Color(.tertiarySystemFill))
                 }
                 if let image = owned?.card?.imageUrl {
-                    AsyncImage(url: image) { $0.resizable().scaledToFit() } placeholder: { ProgressView() }
+                    CachedImage(url: image) { $0.resizable().scaledToFit() } placeholder: { ProgressView() }
                         .padding(3)
                 } else {
                     Sprite(url: pokemon.spriteURL, silhouette: owned == nil).padding(8)
